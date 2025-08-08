@@ -1,0 +1,21 @@
+# Nextflow
+.nextflow/
+work/
+results/
+output/
+*.log*
+
+# Data files (uncomment if you don't want to track data)
+# data/*.vcf.gz
+# data/*.bam
+# data/*.bai
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+
+# Output directories
+results/
+work/
+.nextflow/ 
