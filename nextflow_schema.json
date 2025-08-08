@@ -1,0 +1,23 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Clinical Pipeline Parameters",
+    "type": "object",
+    "properties": {
+      "samplesheet": {
+        "type": "string",
+        "description": "Path to CSV file with sample names, VCF and BAM paths",
+        "default": "data/samplesheet.csv"
+      },
+      "bed": {
+        "type": "string",
+        "description": "Path to BED file with regions of interest"
+      },
+      "outdir": {
+        "type": "string",
+        "description": "Output directory",
+        "default": "results"
+      }
+    },
+    "required": ["samplesheet", "bed"]
+  }
+  
