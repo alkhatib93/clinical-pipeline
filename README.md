@@ -136,45 +136,5 @@ cp my_exons.bed data/regions.bed
 nextflow run main.nf --scriptdir scripts
 ```
 
----
-
-## 🔧 Configuration
-
-The `nextflow.config` file defines:
-- Executor settings (e.g., local, SLURM, Docker)
-- Default resources per process
-- Parameters and defaults
-- PublishDir settings for each output
-
----
-
-## 🧪 Troubleshooting
-
-- ❌ **Missing Index**: Make sure BAMs are indexed (`.bai` present)
-- ❌ **Permissions**: Ensure read/write access to all files
-- ❌ **VAF is NA**: Check that VCF has AD or VAF FORMAT fields
-- 💡 **Not enough variants?** Try adjusting filters or BED content
-
----
-
-## ➕ Extending the Pipeline
-
-You can easily add:
-- Additional annotations (e.g., dbNSFP, ClinVar)
-- New summary tabs in the report script
-- Plots or interactive HTML reports
-
----
-
-## 📄 License
-
-This pipeline is provided under MIT License for research and clinical prototyping.
-
----
-
-## 👨‍🔬 Contact
-For questions or contributions, open an issue or contact [your.name@domain.org](mailto:your.name@domain.org).
-
----
 
 Happy variant hunting! 🧬✨
