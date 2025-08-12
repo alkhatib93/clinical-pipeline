@@ -12,6 +12,7 @@ params.scriptdir   = "${workflow.projectDir}/scripts"
 
 // VEP parameters
 def HOME = System.getenv('HOME') ?: '.'
+params.run_vep   = params.run_vep ?: true
 params.vep_cache = params.vep_cache ?: "${HOME}/vep_data"
 params.vep_fasta = params.vep_fasta ?: "${HOME}/vep_data/Homo_sapiens.GRCh38.dna.toplevel.fa.gz"
 
@@ -222,13 +223,6 @@ process VEP_Annotate {
   tag "$sample"
   publishDir "${params.vcfdir}", mode: 'copy'
 
-  // Use the official VEP Docker image
-  container 'ensemblorg/ensembl-vep'
-
-  // Mount your cache into /cache (read-only) inside the container
-  // NOTE: containerOptions is allowed inside the process
-  containerOptions "-v ${params.vep_cache}:/cache:ro"
-
   input:
   tuple val(sample), path(vcf)
 
@@ -236,21 +230,33 @@ process VEP_Annotate {
   tuple val(sample), path("${sample}.vep.vcf.gz")
 
   script:
-    """
-    docker run --rm -t \
-      -v "${params.vep_cache}:/cache" \
-      -v "${params.vcfdir}:/work" \
-      ensemblorg/ensembl-vep \
-      vep \
-        -i /work/${vcf.getName()} \
-        -o /work/${sample}.vep.vcf \
-        --offline --cache --dir_cache /cache \
-        --fasta /cache/$(basename ${params.vep_fasta}) \
-        --assembly GRCh38 --species homo_sapiens \
-        --vcf --fork 8 --buffer_size 50000 --no_stats
-    """
+  """
+  set -euo pipefail
 
-// Step 9: Generate lean report
+  VCF_PATH=\$(realpath "$vcf")
+  VCF_DIR=\$(dirname "\$VCF_PATH")
+  VCF_BASE=\$(basename "\$VCF_PATH")
+
+  # Mount the process work dir so VEP can read/write there
+  docker run --rm -t \\
+    -u \$(id -u):\$(id -g) \\
+    -v "${params.vep_cache}:/cache:ro" \\
+    -v "\$VCF_DIR:/work" \\
+    ensemblorg/ensembl-vep \\
+      vep \\
+        -i /work/\$VCF_BASE \\
+        -o /work/${sample}.vep.vcf.gz \\
+        --vcf --compress_output bgzip \\
+        --offline --cache --dir_cache /cache \\
+        --fasta /cache/\$(basename "${params.vep_fasta}") \\
+        --assembly GRCh38 --species homo_sapiens \\
+        --force_overwrite --no_stats
+
+  # index the output for downstream tools
+  # tabix -p vcf ${sample}.vep.vcf.gz
+  """
+}
+
 process LeanReport {
     tag "$sample"
     publishDir "${params.outdir}/reports", mode: 'copy'
@@ -276,34 +282,30 @@ process LeanReport {
 workflow {
 
     bed_ch = Channel.of(file(params.bed))
-    
-    // VEP channels
-    //vep_cache_ch = Channel.of(file(params.vep_cache))
-    //vep_plugins_ch = Channel.of(file(params.vep_plugins))
 
+    // Step 1: VCF processing
     BedFilterVCF(sample_ch, bed_ch)
     NormalizeVCF(BedFilterVCF.out)
     FilterVCF(NormalizeVCF.out)
     AddVAF(FilterVCF.out)
-    addvaf_ch = AddVAF.out
-    VEP_Annotate(addvaf_ch)
-    vep_ch = VEP_Annotate.out
 
+    // Step 2: Optional VEP annotation
+    vep_ch = params.run_vep ? VEP_Annotate(AddVAF.out) : AddVAF.out
+
+    // Step 3: BAM processing
     BedFilterBAM(sample_ch, bed_ch)
-
-    // Extract (sample, bam) from BedFilterBAM output
     bam_sample_ch = BedFilterBAM.out.map { sample, vcf, bam, bai -> tuple(sample, bam, bai) }
 
     CoverageSummary(bam_sample_ch.map { sample, bam, bai -> tuple(sample, bam) }, bed_ch)
     R1R2Ratio(bam_sample_ch, bed_ch)
     ForwardReverseRatio(bam_sample_ch, bed_ch)
-    
-    // Join all by sample name
+
+    // Step 4: Join all outputs by sample name
     lean_input_ch = vep_ch
-    //lean_input_ch = AddVAF.out
         .join(CoverageSummary.out)
         .join(R1R2Ratio.out)
         .join(ForwardReverseRatio.out)
 
+    // Step 5: Generate lean report
     LeanReport(lean_input_ch)
-} 
+}

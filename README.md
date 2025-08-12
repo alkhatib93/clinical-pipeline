@@ -4,16 +4,16 @@ A **Nextflow pipeline** for clinical variant analysis, combining variant filteri
 
 ## 🧬 Overview
 
-This pipeline performs:
+This pipeline performs comprehensive clinical variant analysis:
 
 1. **BED Filtering**: Keep only variants in predefined regions of interest.
 2. **VCF Normalization**: Split multiallelic variants and left-align indels.
 3. **Quality Filtering**: Keep variants with `DP ≥ 20` and `QUAL ≥ 30`.
 4. **VAF Annotation**: Add VAF (Variant Allele Frequency) tags.
-5. **VEP Annotation**: Comprehensive variant annotation with REVEL, SpliceAI, ClinVar, CADD, and dbNSFP.
-6. **Coverage Analysis**: Calculate per-base and per-region coverage.
-7. **Read Balance QC**: R1/R2 and Forward/Reverse strand ratios.
-8. **Lean Reporting**: Produce an Excel report with comprehensive variant summaries.
+5. **VEP Annotation**: Comprehensive variant annotation with pathogenicity scores and clinical databases.
+6. **Coverage Analysis**: Calculate per-base and per-region coverage at multiple thresholds (20x, 30x, 50x, 100x).
+7. **Read Balance QC**: R1/R2 read pair ratios and Forward/Reverse strand balance per region.
+8. **Lean Reporting**: Produce a comprehensive Excel report with variant stratification by confidence and clinical significance.
 
 ---
 
@@ -22,7 +22,7 @@ This pipeline performs:
 - Nextflow (v20+)
 - Python ≥3.7
 - `bcftools`, `samtools`, `bedtools`, `tabix`, `vep`
-- Python packages: `pandas`, `openpyxl`
+- Python packages: `pandas`, `openpyxl`, `cyvcf2`
 
 ---
 
@@ -71,14 +71,33 @@ BED file with three columns: `chrom`, `start`, `end`. Example:
 ```
 
 ### VEP Data Requirements
-The pipeline requires VEP cache and plugin data:
+The pipeline requires VEP cache and reference data:
 
-#### VEP Cache
+#### VEP Cache Setup
+The pipeline supports both Docker and local VEP installations:
+
+**Option 1: Docker (Recommended)**
+```bash
+# Docker is enabled by default
+nextflow run main.nf --use_docker true
+```
+
+**Option 2: Local VEP Installation**
+```bash
+# Use the provided setup script
+./scripts/setup_vep_cache.sh --cache-dir ~/vep_data --version 109 --assembly GRCh38
+
+# Run pipeline with local VEP
+nextflow run main.nf --use_docker false --vep_cache ~/vep_data --vep_fasta ~/vep_data/Homo_sapiens.GRCh38.dna.toplevel.fa.gz
+```
+
+#### VEP Cache Requirements
 - Assembly: GRCh38
-- Cache directory: `data/vep_cache/`
+- Cache directory: Contains VEP cache files for human genome
+- Reference fasta: `Homo_sapiens.GRCh38.dna.toplevel.fa.gz` with index
 
-#### VEP Plugins
-Required plugin files in `data/vep_plugins/`:
+#### VEP Plugins (Optional)
+For enhanced annotation, you can add plugin files to your VEP cache:
 - `revel_all_chromosomes.tsv.gz` - REVEL scores
 - `spliceai_scores.raw.snv.hg38.vcf.gz` - SpliceAI SNV scores
 - `spliceai_scores.raw.indel.hg38.vcf.gz` - SpliceAI indel scores
@@ -101,8 +120,8 @@ nextflow run main.nf \
   --samplesheet data/samplesheet.csv \
   --bed data/merged_output.bed \
   --outdir results \
-  --vep_cache data/vep_cache \
-  --vep_plugins data/vep_plugins
+  --vep_cache ~/vep_data \
+  --vep_fasta ~/vep_data/Homo_sapiens.GRCh38.dna.toplevel.fa.gz
 ```
 
 ### Parameter Summary
@@ -111,10 +130,10 @@ nextflow run main.nf \
 | `--samplesheet`| `data/samplesheet.csv`  | CSV with sample, vcf, and bam paths  |
 | `--bed`        | `data/merged_output.bed`| BED file of regions to filter        |
 | `--outdir`     | `results`               | Output directory                     |
-| `--vep_cache`  | `data/vep_cache`        | VEP cache directory                  |
-| `--vep_plugins`| `data/vep_plugins`      | VEP plugins directory                |
-| `--min_depth`  | `20`                    | Minimum read depth for filtering     |
-| `--min_qual`   | `30`                    | Minimum quality score for filtering  |
+| `--run_vep`    | `true`                  | Enable VEP annotation                |
+| `--use_docker` | `true`                  | Use Docker for VEP (vs local install)|
+| `--vep_cache`  | `~/vep_data`            | VEP cache directory                  |
+| `--vep_fasta`  | `~/vep_data/Homo_sapiens.GRCh38.dna.toplevel.fa.gz` | Reference fasta |
 
 ---
 
@@ -133,10 +152,27 @@ nextflow run main.nf \
 - `{sample}_frstrand_per_exon.tsv`: Forward/Reverse strand balance
 
 ### 📓 Lean Reports (`results/reports/`)
-Excel report with multiple sheets:
-- **Variants**: All variants with annotations and QC metrics
-- **Summary**: Statistical summary of variants and coverage
-- **Quality_Metrics**: Per-region quality metrics
+Comprehensive Excel report with multiple analysis sheets:
+
+**Main Variant Sheets:**
+- **All Variants**: Complete variant list with all annotations and QC metrics
+- **Unique HighConf Rare**: High-confidence rare variants (VAF 35-65% for het, ≥90% for hom, gnomAD AF <1%)
+- **Population HighConf**: High-confidence common variants (VAF 35-65% for het, ≥90% for hom, gnomAD AF ≥1%)
+- **Medium Confidence**: Variants with VAF 20-34% or 65-89%
+- **Low Confidence**: Variants with VAF <20%
+- **ClinVar Pathogenic**: Variants with ClinVar pathogenic annotations
+
+**Summary Sheets:**
+- **Coverage Summary**: Statistical summary of coverage metrics (20x, 30x, 50x, 100x)
+- **Gene Summary**: Per-gene variant counts, VAF ranges, and consequence summaries
+
+**Variant Information Included:**
+- **Basic Info**: Chromosome, position, reference/alternate alleles, gene, transcript
+- **Annotations**: VEP consequences, impact, HGVS notation (cDNA/protein), ClinVar status
+- **Quality Metrics**: Depth, VAF, zygosity, coverage at multiple thresholds
+- **Read Balance**: R1/R2 read pair ratios, forward/reverse strand balance
+- **Population Data**: gnomAD allele frequencies
+- **Pathogenicity Scores**: REVEL, SpliceAI scores (when available)
 
 ### 📈 Pipeline Reports
 - `pipeline_report.html`: DAG and summary
@@ -150,20 +186,49 @@ Excel report with multiple sheets:
 The pipeline includes comprehensive VEP annotation with:
 
 ### Core Annotations
-- **REVEL**: Rare Exome Variant Ensemble Learner scores for pathogenicity prediction
-- **SpliceAI**: Splice site prediction scores for splicing impact
-- **ClinVar**: Clinical variant database for clinical significance
-- **CADD**: Combined Annotation Dependent Depletion scores
-- **dbNSFP**: Database for nonsynonymous SNPs' functional predictions
+- **Gene & Transcript**: Gene symbols, transcript IDs, and feature information
+- **Consequences**: Variant effects (missense, nonsense, splice site, etc.)
+- **Impact**: Severity assessment (HIGH, MODERATE, LOW, MODIFIER)
+- **HGVS Notation**: cDNA (HGVSc) and protein (HGVSp) change descriptions
+- **Population Data**: gnomAD allele frequencies (genome and exome)
+- **Pathogenicity Scores**: REVEL and SpliceAI scores (when available)
+- **Clinical Data**: ClinVar clinical significance and star ratings
 
 ### Annotation Output
 Each variant includes:
-- Consequence predictions
-- Impact assessments
-- Gene and transcript information
-- Protein change predictions
-- Pathogenicity scores
-- Clinical significance
+- **Functional Impact**: Detailed consequence and impact predictions
+- **Molecular Changes**: Precise cDNA and protein change descriptions
+- **Population Frequency**: gnomAD allele frequencies for variant assessment
+- **Pathogenicity Prediction**: REVEL scores for missense variants
+- **Splicing Impact**: SpliceAI scores for splice site predictions
+- **Clinical Significance**: ClinVar annotations and confidence levels
+
+---
+
+## 🎯 Variant Confidence Stratification
+
+The pipeline automatically stratifies variants by confidence level based on VAF and population frequency:
+
+### **High Confidence Variants**
+- **Heterozygous**: VAF 35-65% (expected range for true heterozygotes)
+- **Homozygous**: VAF ≥90% (expected for true homozygotes)
+- **Rare**: gnomAD AF <1% (likely disease-relevant)
+- **Common**: gnomAD AF ≥1% (population variants)
+
+### **Medium Confidence Variants**
+- VAF 20-34% or 65-89% (borderline ranges)
+- May represent true variants with technical artifacts
+- Require additional validation
+
+### **Low Confidence Variants**
+- VAF <20% (likely sequencing artifacts)
+- Often filtered out in clinical analysis
+- May represent somatic variants or contamination
+
+### **Clinical Prioritization**
+- **ClinVar Pathogenic**: Variants with established clinical significance
+- **Rare High-Confidence**: Primary candidates for clinical interpretation
+- **Population Variants**: Common variants for reference
 
 ---
 
@@ -223,9 +288,24 @@ For detailed usage instructions, troubleshooting, and advanced configuration, se
 
 Common issues and solutions:
 
-1. **VEP Cache Not Found**: Ensure VEP cache is properly installed and path is correct
-2. **BAM Index Missing**: Index BAM files with `samtools index`
-3. **Memory Issues**: Increase memory allocation in `nextflow.config`
+1. **VEP Cache Not Found**: 
+   - Ensure VEP cache is properly installed using `./scripts/setup_vep_cache.sh`
+   - Check that `--vep_cache` and `--vep_fasta` paths are correct
+   - For Docker: ensure Docker is running and the image is available
+
+2. **Docker Issues**:
+   - If Docker fails, try `--use_docker false` with local VEP installation
+   - Ensure Docker daemon is running: `docker ps`
+   - Pull the VEP image: `docker pull ensemblorg/ensembl-vep:latest`
+
+3. **BAM Index Missing**: Index BAM files with `samtools index`
+
+4. **Memory Issues**: Increase memory allocation in `nextflow.config`
+
+5. **VEP Process Fails**:
+   - Check VEP cache directory exists and contains required files
+   - Verify reference fasta file exists and is indexed
+   - Ensure input VCF files are properly formatted and indexed
 
 For detailed troubleshooting, see [USAGE.md](docs/USAGE.md).
 
