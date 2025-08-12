@@ -8,7 +8,12 @@ params.outdir      = "results"
 params.vcfdir      = "${params.outdir}/vcf"
 params.qcdir       = "${params.outdir}/qc"
 params.reportdir   = "${params.outdir}/reports"
-params.scriptdir = "${workflow.projectDir}/scripts"
+params.scriptdir   = "${workflow.projectDir}/scripts"
+
+// VEP parameters
+def HOME = System.getenv('HOME') ?: '.'
+params.vep_cache = params.vep_cache ?: "${HOME}/vep_data"
+params.vep_fasta = params.vep_fasta ?: "${HOME}/vep_data/Homo_sapiens.GRCh38.dna.toplevel.fa.gz"
 
 // Input channel
 Channel
@@ -212,6 +217,39 @@ process ForwardReverseRatio {
     """
 }
 
+// Step 10: VEP Annotation with plugins
+process VEP_Annotate {
+  tag "$sample"
+  publishDir "${params.vcfdir}", mode: 'copy'
+
+  // Use the official VEP Docker image
+  container 'ensemblorg/ensembl-vep'
+
+  // Mount your cache into /cache (read-only) inside the container
+  // NOTE: containerOptions is allowed inside the process
+  containerOptions "-v ${params.vep_cache}:/cache:ro"
+
+  input:
+  tuple val(sample), path(vcf)
+
+  output:
+  tuple val(sample), path("${sample}.vep.vcf.gz")
+
+  script:
+    """
+    docker run --rm -t \
+      -v "${params.vep_cache}:/cache" \
+      -v "${params.vcfdir}:/work" \
+      ensemblorg/ensembl-vep \
+      vep \
+        -i /work/${vcf.getName()} \
+        -o /work/${sample}.vep.vcf \
+        --offline --cache --dir_cache /cache \
+        --fasta /cache/$(basename ${params.vep_fasta}) \
+        --assembly GRCh38 --species homo_sapiens \
+        --vcf --fork 8 --buffer_size 50000 --no_stats
+    """
+
 // Step 9: Generate lean report
 process LeanReport {
     tag "$sample"
@@ -238,11 +276,18 @@ process LeanReport {
 workflow {
 
     bed_ch = Channel.of(file(params.bed))
+    
+    // VEP channels
+    //vep_cache_ch = Channel.of(file(params.vep_cache))
+    //vep_plugins_ch = Channel.of(file(params.vep_plugins))
 
     BedFilterVCF(sample_ch, bed_ch)
     NormalizeVCF(BedFilterVCF.out)
     FilterVCF(NormalizeVCF.out)
     AddVAF(FilterVCF.out)
+    addvaf_ch = AddVAF.out
+    VEP_Annotate(addvaf_ch)
+    vep_ch = VEP_Annotate.out
 
     BedFilterBAM(sample_ch, bed_ch)
 
@@ -254,7 +299,8 @@ workflow {
     ForwardReverseRatio(bam_sample_ch, bed_ch)
     
     // Join all by sample name
-    lean_input_ch = AddVAF.out
+    lean_input_ch = vep_ch
+    //lean_input_ch = AddVAF.out
         .join(CoverageSummary.out)
         .join(R1R2Ratio.out)
         .join(ForwardReverseRatio.out)
