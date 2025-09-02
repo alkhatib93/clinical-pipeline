@@ -11,9 +11,10 @@ This pipeline performs comprehensive clinical variant analysis:
 3. **Quality Filtering**: Keep variants with `DP ≥ 20` and `QUAL ≥ 30`.
 4. **VAF Annotation**: Add VAF (Variant Allele Frequency) tags.
 5. **VEP Annotation**: Comprehensive variant annotation with pathogenicity scores and clinical databases.
-6. **Coverage Analysis**: Calculate per-base and per-region coverage at multiple thresholds (20x, 30x, 50x, 100x).
-7. **Read Balance QC**: R1/R2 read pair ratios and Forward/Reverse strand balance per region.
-8. **Lean Reporting**: Produce a comprehensive Excel report with variant stratification by confidence and clinical significance.
+6. **Enhanced Coverage Analysis**: Calculate per-base and per-region coverage at multiple thresholds (10x, 20x, 30x, 50x, 100x) with gap analysis.
+7. **Comprehensive QC Metrics**: BAM statistics, read balance analysis, sex determination, and coverage gaps.
+8. **Read Balance QC**: R1/R2 read pair ratios and Forward/Reverse strand balance per region.
+9. **Lean Reporting**: Produce a comprehensive Excel report with variant stratification by confidence and clinical significance.
 
 ---
 
@@ -21,8 +22,9 @@ This pipeline performs comprehensive clinical variant analysis:
 
 - Nextflow (v20+)
 - Python ≥3.7
-- `bcftools`, `samtools`, `bedtools`, `tabix`, `vep`
+- `bcftools`, `samtools`, `bedtools`, `tabix`, `vep`, `mosdepth`
 - Python packages: `pandas`, `openpyxl`, `cyvcf2`
+- Docker (for VEP annotation)
 
 ---
 
@@ -43,7 +45,9 @@ clinical-pipeline/
 ├── bin/                   # Helper scripts
 │   └── test_setup.sh      # Setup validation script
 ├── scripts/               # Python scripts
-│   └── generate_lean_report.py  # Report generation script
+│   ├── generate_lean_report.py      # Report generation script
+│   ├── generate_lean_report_org.py  # Enhanced report generation
+│   └── summarize_mosdepth.py        # Coverage summary script
 ├── results/               # Output folder (auto-created)
 │   ├── vcf/               # Filtered/normalized/annotated VCFs
 │   ├── qc/                # Coverage and balance summaries
@@ -146,12 +150,23 @@ nextflow run main.nf \
 - `{sample}.vaf_added.vcf.gz`: VCF with VAF tags added
 - `{sample}.vep_annotated.vcf.gz`: VCF with comprehensive VEP annotations
 
-### 📊 QC Summaries (`results/qc/`)
+### 📊 Enhanced QC Summaries (`results/qc/`)
 - `{sample}_coverage_summary.sorted.txt`: % of base positions covered at 20x, 30x, 50x, 100x
+- `{sample}_coverage_summary.overall.txt`: Overall coverage statistics with thresholds
 - `{sample}_r1r2_per_exon.tsv`: Read 1 / Read 2 balance per exon
 - `{sample}_frstrand_per_exon.tsv`: Forward/Reverse strand balance
+- `{sample}_flagstat.txt`: BAM alignment statistics
+- `{sample}_stats.txt`: Detailed BAM statistics
+- `{sample}_bcftools_stats.txt`: VCF statistics (Ti/Tv ratios, etc.)
+- `{sample}_sex_check.txt`: Sex determination from read depth ratios
+- `{sample}.acmg.depth.txt`: Per-base depth within ACMG regions
+- `{sample}.acmg_gaps_lt20.bed`: Coverage gaps below 20x
+- `{sample}.acmg_gaps_lt30.bed`: Coverage gaps below 30x
+- `{sample}.mosdepth.summary.txt`: Mosdepth coverage summary
+- `{sample}.regions.bed.gz`: Per-region coverage data
+- `{sample}.thresholds.bed.gz`: Coverage at multiple thresholds
 
-### 📓 Lean Reports (`results/reports/`)
+### 📓 Enhanced Lean Reports (`results/reports/`)
 Comprehensive Excel report with multiple analysis sheets:
 
 **Main Variant Sheets:**
@@ -163,16 +178,17 @@ Comprehensive Excel report with multiple analysis sheets:
 - **ClinVar Pathogenic**: Variants with ClinVar pathogenic annotations
 
 **Summary Sheets:**
-- **Coverage Summary**: Statistical summary of coverage metrics (20x, 30x, 50x, 100x)
+- **Coverage Summary**: Statistical summary of coverage metrics (10x, 20x, 30x, 50x, 100x)
 - **Gene Summary**: Per-gene variant counts, VAF ranges, and consequence summaries
 
-**Variant Information Included:**
+**Enhanced Variant Information Included:**
 - **Basic Info**: Chromosome, position, reference/alternate alleles, gene, transcript
 - **Annotations**: VEP consequences, impact, HGVS notation (cDNA/protein), ClinVar status
 - **Quality Metrics**: Depth, VAF, zygosity, coverage at multiple thresholds
 - **Read Balance**: R1/R2 read pair ratios, forward/reverse strand balance
 - **Population Data**: gnomAD allele frequencies
 - **Pathogenicity Scores**: REVEL, SpliceAI scores (when available)
+- **Coverage Gaps**: ACMG region coverage gaps below 20x and 30x thresholds
 
 ### 📈 Pipeline Reports
 - `pipeline_report.html`: DAG and summary
@@ -205,7 +221,7 @@ Each variant includes:
 
 ---
 
-## 🎯 Variant Confidence Stratification
+## 🎯 Enhanced Variant Confidence Stratification
 
 The pipeline automatically stratifies variants by confidence level based on VAF and population frequency:
 
@@ -229,6 +245,27 @@ The pipeline automatically stratifies variants by confidence level based on VAF 
 - **ClinVar Pathogenic**: Variants with established clinical significance
 - **Rare High-Confidence**: Primary candidates for clinical interpretation
 - **Population Variants**: Common variants for reference
+
+---
+
+## 🔬 Enhanced Quality Control Features
+
+### **Multi-Threshold Coverage Analysis**
+- Coverage analysis at 10x, 20x, 30x, 50x, and 100x thresholds
+- Gap identification below critical coverage levels (20x, 30x)
+- Per-region coverage statistics for clinical interpretation
+
+### **Comprehensive BAM QC**
+- Alignment statistics and quality metrics
+- Read pair balance analysis
+- Strand balance assessment
+- Sex determination from chromosome coverage ratios
+
+### **VCF Quality Assessment**
+- Transition/transversion ratios
+- Heterozygosity/homozygosity ratios
+- Quality score distributions
+- Depth and VAF distributions
 
 ---
 
@@ -307,6 +344,11 @@ Common issues and solutions:
    - Verify reference fasta file exists and is indexed
    - Ensure input VCF files are properly formatted and indexed
 
+6. **Coverage Analysis Issues**:
+   - Ensure mosdepth is installed: `conda install -c bioconda mosdepth`
+   - Check BED file format and coordinates
+   - Verify BAM files have proper indexing
+
 For detailed troubleshooting, see [USAGE.md](docs/USAGE.md).
 
 ---
@@ -318,6 +360,7 @@ If you use this pipeline in your research, please cite:
 - **VEP**: McLaren, W. et al. (2016). The Ensembl Variant Effect Predictor. Genome Biology, 17(1), 122.
 - **REVEL**: Ioannidis, N. M. et al. (2016). REVEL: An ensemble method for predicting the pathogenicity of rare missense variants. The American Journal of Human Genetics, 99(4), 877-885.
 - **SpliceAI**: Jaganathan, K. et al. (2019). Predicting splicing from primary sequence with deep learning. Cell, 176(3), 535-548.
+- **Mosdepth**: Pedersen, B. S. & Quinlan, A. R. (2018). Mosdepth: quick coverage calculation for genomes and exomes. Bioinformatics, 34(5), 867-868.
 
 ---
 
